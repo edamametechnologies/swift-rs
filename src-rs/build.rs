@@ -232,38 +232,55 @@ impl SwiftLinker {
                 .join("swift-rs")
                 .join(&package.name);
 
+            let sdk_path_output = Command::new("xcrun")
+                .args(["--sdk", &rust_target.sdk.to_string(), "--show-sdk-path"])
+                .output()
+                .unwrap();
+            if !sdk_path_output.status.success() {
+                panic!(
+                    "Failed to get SDK path with `xcrun --sdk {} --show-sdk-path`",
+                    rust_target.sdk
+                );
+            }
+
+            let sdk_path = String::from_utf8_lossy(&sdk_path_output.stdout);
+
             let mut command = Command::new("swift");
+            command.current_dir(&package.path);
+
+            let arch = match std::env::consts::ARCH {
+                "aarch64" => "arm64",
+                arch => arch,
+            };
+
+            let swift_target_triple = rust_target.swift_target_triple(
+                &self.macos_min_version,
+                self.ios_min_version.as_deref(),
+            );
+
             command
-                .args(["build", "-c", configuration])
-                .current_dir(&package.path)
-                .args(["--build-path", &out_path.display().to_string()]);
-
-			let sdk_path_output = Command::new("xcrun")
-				.args(["--sdk", &rust_target.sdk.to_string(), "--show-sdk-path"])
-				.output()
-				.unwrap();
-			if !sdk_path_output.status.success() {
-				panic!(
-					"Failed to get SDK path with `xcrun --sdk {} --show-sdk-path`",
-					rust_target.sdk
-				);
-			}
-
-			let sdk_path = String::from_utf8_lossy(&sdk_path_output.stdout);
-
-			command.args([
-				"-Xswiftc",
-				"-sdk",
-				"-Xswiftc",
-				sdk_path.trim(),
-				"-Xswiftc",
-				"-target",
-				"-Xswiftc",
-				&rust_target.swift_target_triple(
-					&self.macos_min_version,
-					self.ios_min_version.as_deref(),
-				),
-			]);
+                // Build the package (duh)
+                .args(["build"])
+                // SDK path for regular compilation (idk)
+                .args(["--sdk", sdk_path.trim()])
+                // Release/Debug configuration
+                .args(["-c", configuration])
+                .args(["--arch", arch])
+                // Where the artifacts will be generated to
+                .args(["--build-path", &out_path.display().to_string()])
+                // Override SDK path for each swiftc instance.
+                // Necessary for iOS compilation.
+                .args(["-Xswiftc", "-sdk"])
+                .args(["-Xswiftc", sdk_path.trim()])
+                // Override target triple for each swiftc instance.
+                // Necessary for iOS compilation.
+                .args(["-Xswiftc", "-target"])
+                .args([
+                    "-Xswiftc",
+                    &swift_target_triple,
+                ])
+                .args(["-Xcc", format!("--target={swift_target_triple}").as_str()])
+                .args(["-Xcxx", format!("--target={swift_target_triple}").as_str()]);
 
             if !command.status().unwrap().success() {
                 panic!("Failed to compile swift package {}", package.name);
@@ -273,10 +290,7 @@ impl SwiftLinker {
                 // swift build uses this output folder no matter what is the target
                 .join(format!(
                     "{}-apple-macosx",
-                    match std::env::consts::ARCH {
-                        "aarch64" => "arm64",
-                        arch => arch,
-                    }
+                    arch
                 ))
                 .join(configuration);
 
@@ -296,10 +310,12 @@ fn link_clang_rt(rust_target: &RustTarget) {
 }
 
 fn clang_link_search_path() -> String {
-    let output = std::process::Command::new("clang")
-        .arg("--print-search-dirs")
-        .output()
-        .unwrap();
+    let output = std::process::Command::new(
+        std::env::var("SWIFT_RS_CLANG").unwrap_or_else(|_| "/usr/bin/clang".to_string()),
+    )
+    .arg("--print-search-dirs")
+    .output()
+    .unwrap();
     if !output.status.success() {
         panic!("Can't get search paths from clang");
     }
