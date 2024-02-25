@@ -25,15 +25,24 @@ This can be done in XCode by selecting File -> New -> Project -> Multiplatform -
 ```swift
 let package = Package(
     dependencies: [
-        .package(name: "SwiftRs", url: "https://github.com/Brendonovich/swift-rs", from: "1.0.5")
+        .package(url: "https://github.com/Brendonovich/swift-rs", from: "1.0.5")
     ],
     products: [
         .library(
             type: .static,
-	    .. // other configuration
         ),
     ],
-    .. // other configuration
+    targets: [
+        .target(
+            // Must specify swift-rs as a dependency of your target
+            dependencies: [
+                .product(
+                    name: "SwiftRs",
+                    package: "swift-rs"
+                )
+            ],
+        )
+    ]
 )
 ```
 3. Create a `build.rs` file in your project's root folder, if you don't have one already.
@@ -62,7 +71,7 @@ With those steps completed, you should be ready to start using Swift code from R
 
 If you experience the error `dyld[16008]: Library not loaded: @rpath/libswiftCore.dylib`
 when using `swift-rs` with [Tauri](https://tauri.app) ensure you have set your
-[Tauri minimum system version](https://tauri.app/v1/guides/distribution/macos/#minimum-system-version)
+[Tauri minimum system version](https://tauri.app/v1/guides/building/macos#setting-a-minimum-system-version)
 to `10.15` or higher in your `tauri.config.json`. 
 
 ## Calling basic functions
@@ -450,7 +459,7 @@ for _ in 0..10000 {
 
 ## Limitations
 
-Currently, the only types that can be created from Rust are number types, boolean and `SRString`.
+Currently, the only types that can be created from Rust are number types, boolean, `SRString`, and `SRData`.
 This is because those types are easy to allocate memory for, either on the stack or on the heap via calling out to swift,
 whereas other types are not. This may be implemented in the future, though.
 
